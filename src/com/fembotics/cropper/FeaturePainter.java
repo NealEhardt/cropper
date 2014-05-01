@@ -888,7 +888,7 @@ public class FeaturePainter extends javax.swing.JPanel {
                 g.setColor(Color.blue);
                 float fzoom = (float)zoom;
                 float K = 2000;
-                float phase = (float)(t*10/zoom)%K + K;
+                float phase = (float)((t*10/zoom)%K) + K;
                 g.setStroke(new BasicStroke(1/fzoom,
                                             BasicStroke.CAP_BUTT,
                                             BasicStroke.JOIN_MITER, 10,
