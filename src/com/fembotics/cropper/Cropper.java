@@ -1,12 +1,3 @@
-/*
- * To-Do list
- *
- *
- * choose crop resolution (megapixels)
- * show uncaught exceptions in a popup
- *
- */
-
 package com.fembotics.cropper;
 
 import java.awt.*;
@@ -22,7 +13,7 @@ public class Cropper extends JFrame {
     JFileChooser chooser = null;
 
     JLabel statusbar; */
-    FeaturePainter painter;
+    JPanel painter;
     
     Cropper() {
         super("Cropper"); // set frame title
@@ -38,7 +29,7 @@ public class Cropper extends JFrame {
 
         c.setLayout(new CardLayout());
 
-        c.add(painter = new FeaturePainter(), "the only effing card");
+        c.add(painter = new MainPanel(), "the only effing card");
 
         setVisible(true);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);

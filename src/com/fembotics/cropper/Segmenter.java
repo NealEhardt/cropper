@@ -1,8 +1,3 @@
-/*
- * To change this template, choose Tools | Templates
- * and open the template in the editor.
- */
-
 package com.fembotics.cropper;
 
 import java.awt.*;
@@ -20,7 +15,7 @@ import javax.swing.undo.*;
 public class Segmenter {
     
     final BufferedImage image, overlay;
-    final FeaturePainter fp;
+    final MainPanel mp;
 
     boolean[][] positive;
     
@@ -30,10 +25,9 @@ public class Segmenter {
     final Raster raster;
     final Queue<PixelEvent> eventQueue = new ConcurrentLinkedQueue<PixelEvent>();
     
-    public Segmenter(BufferedImage img, FeaturePainter fp)
-    {
+    public Segmenter(BufferedImage img, MainPanel mp) {
         image = img;
-        this.fp = fp;
+        this.mp = mp;
         
         W = img.getWidth();
         H = img.getHeight();
@@ -308,7 +302,7 @@ public class Segmenter {
             return false;
         }
 
-        fp.statusLabel.setText("Rendering...");
+        mp.statusLabel.setText("Rendering...");
         positive = getBinary();
         return true;
     }
@@ -316,7 +310,7 @@ public class Segmenter {
     private void dequeueEvents() {
         if(eventQueue.isEmpty())
             return;
-        fp.statusLabel.setText("Merging in new events...");
+        mp.statusLabel.setText("Merging in new events...");
 
         while(!eventQueue.isEmpty()) {
             PixelEvent e = eventQueue.poll();
@@ -358,9 +352,9 @@ public class Segmenter {
                 int N = updaterQueue.size();
                 maxN = Math.max(N, maxN);
 
-                fp.statusLabel.setText("Propogating changes... queue size: "
+                mp.statusLabel.setText("Propagating changes... queue size: "
                                                         +commaAdder.format(N));
-                fp.progressBar.setValue(100*(maxN-N)/maxN);
+                mp.progressBar.setValue(100*(maxN-N)/maxN);
             }
 
             sizeHistory.add(updaterQueue.size());

@@ -1,11 +1,4 @@
 /*
- * To change this template, choose Tools | Templates
- * and open the template in the editor.
- */
-
-/*
- * FeaturePainter.java
- *
  * Created on Nov 24, 2010, 7:13:39 PM
  */
 
@@ -24,6 +17,11 @@ import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.imageio.ImageIO;
+import javax.jnlp.FileContents;
+import javax.jnlp.FileOpenService;
+import javax.jnlp.FileSaveService;
+import javax.jnlp.ServiceManager;
+import javax.jnlp.UnavailableServiceException;
 import javax.swing.*;
 import javax.swing.undo.*;
 
@@ -31,7 +29,7 @@ import javax.swing.undo.*;
  *
  * @author Neal Ehardt <nialsh@gmail.com>
  */
-public class FeaturePainter extends javax.swing.JPanel {
+public class MainPanel extends javax.swing.JPanel {
 
     /** image width */
     int W;
@@ -43,24 +41,24 @@ public class FeaturePainter extends javax.swing.JPanel {
     Segmenter segmenter;
     Path2D edgePath;
     
-    File imageFile;
-    
+    final Object segmenterUpdaterKey = new Object();
     Thread repainter, segmenterUpdater;
     UndoManager undoManager;
 
     Frame parentFrame;
-    FileDialog opener, saver;
-    String suffixFilter;
+    FileOpenService opener;
+    FileSaveService saver;
+    String fileName;
     
     double zoom = 1;
     boolean shrunken;
 
-    /** Creates new form FeaturePainter */
-    public FeaturePainter() {
+    
+    public MainPanel() {
         initComponents();
 
         setupDialogs();
-        setupUndoStuff();
+        setupUndoManager();
         setupPaintPanel();
         sleepUI();
     }
@@ -70,7 +68,7 @@ public class FeaturePainter extends javax.swing.JPanel {
         paintPanel.addMouseListener(adapter);
         paintPanel.addMouseMotionListener(adapter);
 
-        // repaint regularly so the background will move
+        // repaint regularly so the checkerboard background will move
         repainter = new Thread("slow repainter") {
             @Override
             public void run() {
@@ -78,7 +76,7 @@ public class FeaturePainter extends javax.swing.JPanel {
                     try {
                         Thread.sleep(150);
                     } catch (InterruptedException ex) {
-                        Logger.getLogger(FeaturePainter.class.getName()).log(Level.SEVERE, null, ex);
+                        Logger.getLogger(MainPanel.class.getName()).log(Level.SEVERE, null, ex);
                     }
                     if(paintPanel.isShowing())
                         paintPanel.repaint();
@@ -109,10 +107,10 @@ public class FeaturePainter extends javax.swing.JPanel {
                                 paintPanel.repaint();
                             }
                         }
-                        synchronized(this) {
-                            wait();
+                        synchronized(segmenterUpdaterKey) {
+                            segmenterUpdaterKey.wait();
                         }
-                    } catch (Exception e) {
+                    } catch (InterruptedException e) {
                         alertException(e, "Segmenter error");
                     }
                 }
@@ -131,16 +129,8 @@ public class FeaturePainter extends javax.swing.JPanel {
             c = c.getParent();
         parentFrame = (Frame)c;
 
-        String[] suffixes = ImageIO.getReaderFileSuffixes();
-        suffixFilter = "*."+suffixes[0];
-        for(int i = 1; i < suffixes.length; ++i)
-            suffixFilter += "; *."+suffixes[i];
-
-        opener = new FileDialog(parentFrame, "Open image", FileDialog.LOAD);
-        saver = new FileDialog(parentFrame, "Save cropped image", FileDialog.SAVE);
-
-
         Thread.setDefaultUncaughtExceptionHandler(new UncaughtExceptionHandler() {
+            @Override
             public void uncaughtException(Thread t, Throwable e) {
                 alertException(e, "Uncaught Exception");
                 throw (RuntimeException)e;
@@ -156,7 +146,7 @@ public class FeaturePainter extends javax.swing.JPanel {
     }
 
 
-    private void setupUndoStuff() {
+    private void setupUndoManager() {
         
         undoManager = new UndoManager();
         updateUndoButtons();
@@ -197,8 +187,8 @@ public class FeaturePainter extends javax.swing.JPanel {
         if(undoManager.canUndo()) {
             System.out.println("undo");
             undoManager.undo();
-            synchronized(segmenterUpdater) {
-                segmenterUpdater.notify();
+            synchronized(segmenterUpdaterKey) {
+                segmenterUpdaterKey.notify();
             }
             updateUndoButtons();
         }
@@ -207,8 +197,8 @@ public class FeaturePainter extends javax.swing.JPanel {
         if(undoManager.canRedo()) {
             System.out.println("redo");
             undoManager.redo();
-            synchronized(segmenterUpdater) {
-                segmenterUpdater.notify();
+            synchronized(segmenterUpdaterKey) {
+                segmenterUpdaterKey.notify();
             }
             updateUndoButtons();
         }
@@ -422,7 +412,6 @@ public class FeaturePainter extends javax.swing.JPanel {
 
         add(jPanel2, java.awt.BorderLayout.NORTH);
 
-        jPanel7.setPreferredSize(null);
         jPanel7.setLayout(new javax.swing.BoxLayout(jPanel7, javax.swing.BoxLayout.PAGE_AXIS));
 
         jPanel17.setPreferredSize(new java.awt.Dimension(0, 28));
@@ -582,22 +571,35 @@ public class FeaturePainter extends javax.swing.JPanel {
     }// </editor-fold>//GEN-END:initComponents
 
     private void openButtonActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_openButtonActionPerformed
-        opener.setFile(suffixFilter);
-        opener.show();
-        if(opener.getFile() == null)
-            return; // user hit cancel
+        if (opener == null) {
+            try {
+                opener = (FileOpenService)ServiceManager.lookup("javax.jnlp.FileOpenService");
+            } catch (UnavailableServiceException ex) {
+                Logger.getLogger(MainPanel.class.getName()).log(Level.SEVERE, null, ex);
+                return;
+            }
+        }
+        
+        final FileContents fc;
+        try {
+            fc = opener.openFileDialog(null, ImageIO.getReaderFileSuffixes());
+            if(fc == null)
+                return; // user hit cancel
+        } catch (IOException ex) {
+            alertException(ex, "Open error");
+            return;
+        }
 
         runWithModal("Opening image", "Opening image...", new Runnable() {
             public void run() {
                 try {
-                    File f = new File(opener.getDirectory() + opener.getFile());
-                    rawImage = ImageIO.read(f);
+                    rawImage = ImageIO.read(fc.getInputStream());
                     if(rawImage == null)
                         throw new IOException();
-                    imageFile = f;
+                    fileName = fc.getName();
                 } catch (IOException ex) {
                     JOptionPane.showMessageDialog(parentFrame,
-                            "Error opening file \""+opener.getFile()+"\"",
+                            "Error opening file",
                             "Error",
                             JOptionPane.ERROR_MESSAGE);
                     return;
@@ -725,7 +727,7 @@ public class FeaturePainter extends javax.swing.JPanel {
             NumberFormat f = new DecimalFormat("#.0");
             int option = JOptionPane.showConfirmDialog(parentFrame,
                             "This is a "+f.format(mp)+" megapixel image.  "+
-                            "Large images can cause Cropper to become unstable so it will be\n"+
+                            "Large images can make Cropper to become unstable so it will be\n"+
                             "shrunk to "+f.format(m)+" megapixels for cropping",
                             "Large image",
                             JOptionPane.OK_CANCEL_OPTION,
@@ -778,36 +780,55 @@ public class FeaturePainter extends javax.swing.JPanel {
         }
 
         int choice = JOptionPane.NO_OPTION;
-        if(shrunken)
+        if (shrunken) {
             choice = JOptionPane.showConfirmDialog(parentFrame,
-                    "You chose to crop a shrunken version of the original image.\n"+
-                    "This lo-res crop can be enlarged and applied to the original image.\n"+
-                    "(This will result in some quality loss but only in the transparency channel)\n\n"+
+                    "You have cropped a shrunken version of the original image.\n"+
+                    "This lo-res crop can be enlarged and applied to the original image.\n\n"+
                     "Save at high resolution?",
                                                 "Save to full resolution?",
                                                 JOptionPane.YES_NO_CANCEL_OPTION);
-
+        }
         if(choice == JOptionPane.CANCEL_OPTION)
             return;
         
-        String name = imageFile.getName();
-        saver.setFile(name.substring(0, name.lastIndexOf('.')) + " (cropped).png");
-        saver.setDirectory(imageFile.getParent());
-        saver.setVisible(true);
-        // ... and it blocks until the dialog closes...
+        if (saver == null) {
+            try {
+                saver = (FileSaveService)ServiceManager.lookup("javax.jnlp.FileSaveService");
+            } catch (UnavailableServiceException ex) {
+                alertException(ex, "Could not get file save service");
+            }
+        }
         
-        if(saver.getFile() == null)
-            return; // user hit cancel
+        // Glue istream to ostream (ImageIO.write and FileSaveService aren't very compatible)
+        final PipedInputStream is = new PipedInputStream();
+        final PipedOutputStream os;
+        try {
+            os = new PipedOutputStream(is);
+            final boolean useFullScaleImage = choice == JOptionPane.YES_OPTION;
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        BufferedImage img = getSaveableImage(useFullScaleImage);
+                        ImageIO.write(img, "png", os);
+                        os.close();
+                    } catch (IOException ex) {
+                        alertException(ex, "Image writer failed");
+                    }
+                }
+            }).start();
+            
+            String name = removeExtension(fileName) + " (cropped).png";
+            saver.saveFileDialog(null, new String[]{"png"}, is, name);
+        } catch (IOException ex) {
+            alertException(ex, "Save error");
+        }
+    }
 
-        name = saver.getDirectory() + saver.getFile();
-        if(!name.endsWith(".png"))
-            name += ".png";
-        File f = new File(name);
-
+    BufferedImage getSaveableImage(boolean useFullScaleImage) {
         BufferedImage toSave = blurred;
 
-
-        if(choice == JOptionPane.YES_OPTION) {
+        if(useFullScaleImage) {
             // we want the alpha channel from the blurred image and RGB from rawImage
 
             // scale up the cropped, blurred image
@@ -833,13 +854,26 @@ public class FeaturePainter extends javax.swing.JPanel {
 
             toSave = scaled;
         }
-        
+        return toSave;
+    }
+    
+    public static String removeExtension(String s) {
+        String filename;
 
-        try {
-            ImageIO.write(toSave, "png", f);
-        } catch (IOException ex) {
-            alertException(ex, "File write failed");
+        // Remove the path upto the filename.
+        int lastSeparatorIndex = s.lastIndexOf(File.separator);
+        if (lastSeparatorIndex == -1) {
+            filename = s;
+        } else {
+            filename = s.substring(lastSeparatorIndex + 1);
         }
+
+        // Remove the extension.
+        int extensionIndex = filename.lastIndexOf(".");
+        if (extensionIndex == -1)
+            return filename;
+
+        return filename.substring(0, extensionIndex);
     }
 
     void paintImage(Graphics2D g) {
@@ -895,7 +929,7 @@ public class FeaturePainter extends javax.swing.JPanel {
                 g.drawImage(segmenter.getOverlay(), null, null);
         }
     }
-
+    
     void updateBlur() {
         if(cropped == null)
             return;
@@ -993,9 +1027,9 @@ public class FeaturePainter extends javax.swing.JPanel {
         paintPanel.revalidate();
     }
 
-    void wakeUI() { wakeOrSleepUI(true); }
-    void sleepUI() { wakeOrSleepUI(false); }
-    void wakeOrSleepUI(boolean awake) {
+    private void wakeUI() { wakeOrSleepUI(true); }
+    private void sleepUI() { wakeOrSleepUI(false); }
+    private void wakeOrSleepUI(boolean awake) {
         bgSlider.setEnabled(awake);
         blurSlider.setEnabled(awake);
         previewButton.setEnabled(awake);
@@ -1011,11 +1045,11 @@ public class FeaturePainter extends javax.swing.JPanel {
             bgSlider.setValue(75);
             zoomSlider.setValue(0);
             updateBackground();
-            openLabel.setText(imageFile.getName());
+            openLabel.setText(fileName);
             statusLabel.setText("Ready");
         } else {
             image = null;
-            imageFile = null;
+            fileName = null;
             W = H = 0;
             openLabel.setText("");
             statusLabel.setText("Please open an image for cropping.");
@@ -1087,7 +1121,7 @@ public class FeaturePainter extends javax.swing.JPanel {
             if(dist == 0)
                 dist = .000001; // don't divide by zero
 
-            HashSet<Point> points = new HashSet<Point>();
+            HashSet<Point> points = new HashSet<>();
             // follow the line from p to oldPoint
             for(int t = 0; t <= dist; ++t)
             {
@@ -1111,8 +1145,8 @@ public class FeaturePainter extends javax.swing.JPanel {
             }
             for(Point i : points) {
                 UndoableEdit edit = segmenter.addControlPoint(i.x, i.y, positive);
-                synchronized(segmenterUpdater) {
-                    segmenterUpdater.notify();
+                synchronized(segmenterUpdaterKey) {
+                    segmenterUpdaterKey.notify();
                 }
                 if(edit != null)
                     compound.addEdit(edit);
